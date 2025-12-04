@@ -1,0 +1,26 @@
+{
+  "name": "Receipts Compiler & Organizer",
+  "short_name": "Receipts Compiler",
+  "description": "Extract information from receipts/invoices using AI, compile them into CSV or Excel, and organize files automatically.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ff4b4b",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "finance", "utilities"],
+  "screenshots": []
+}
