@@ -158,7 +158,7 @@ def sanitize_filename(text):
     """Removes illegal characters from a string to make it safe for a filename."""
     return re.sub(r'[\\/*?:"<>|]', "", str(text))
 
-def generate_filename(data, extension, format_string="{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - {Price Amount}"):
+def generate_filename(data, extension, format_string="{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - RM{Price Amount}"):
     """Generates a filename based on the format string and data."""
     try:
         # Create a safe dictionary for formatting
@@ -182,7 +182,7 @@ def generate_filename(data, extension, format_string="{Date} - {Item Category} -
         print(f"Error generating filename: {e}")
         return f"Error_Renaming{extension}"
 
-def rename_file(original_path, data, format_string="{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - {Price Amount}"):
+def rename_file(original_path, data, format_string="{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - RM{Price Amount}"):
     """
     Renames the file based on the extracted data and format string.
     """
@@ -206,7 +206,7 @@ def rename_file(original_path, data, format_string="{Date} - {Item Category} - {
         print(f"Error renaming file {original_path}: {e}")
         return original_path
 
-def copy_and_rename_file(original_path, data, destination_folder, format_string="{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - {Price Amount}"):
+def copy_and_rename_file(original_path, data, destination_folder, format_string="{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - RM{Price Amount}"):
     """
     Copies the file to the destination folder and renames it based on the extracted data and format string.
     """

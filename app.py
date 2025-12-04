@@ -2,12 +2,14 @@ import streamlit as st
 import os
 import pandas as pd
 from dotenv import load_dotenv
-from utils import configure_gemini, extract_receipt_info, rename_file, copy_and_rename_file
+from utils import configure_gemini, extract_receipt_info, rename_file, copy_and_rename_file, generate_filename
 import subprocess
 import signal
 import sys
 
 import shutil
+import zipfile
+import io
 
 load_dotenv()
 
@@ -95,7 +97,7 @@ with st.sidebar:
     # Output Format
     output_format = st.selectbox("Output Format", ["CSV", "Excel (.xlsx)", "None"])
 
-    st.info("Supported formats: .jpg, .jpeg, .png, .webp")
+    st.info("Note: File moving and renaming on disk is only available in 'Folder Path' mode. For uploaded files, you can download a ZIP of renamed files.")
 
     # Initialize session state
     if 'processed_data' not in st.session_state:
@@ -126,6 +128,7 @@ with selection_container.container():
                 accept_multiple_files=True,
                 help="Select one or more receipt/invoice images to process"
             )
+            st.info("Supported formats: .jpg, .jpeg, .png, .webp")
             if uploaded_files:
                 st.success(f"Uploaded {len(uploaded_files)} file(s)")
         else:
@@ -137,7 +140,7 @@ with selection_container.container():
             st.subheader("2. Renaming Options")
             st.markdown("Customize how your files are renamed.")
             
-            default_format = "{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - {Price Amount}"
+            default_format = "{Date} - {Item Category} - {Vendor Name} - {Item Name} - {Receipt_Invoice_No} - RM{Price Amount}"
             format_string = st.text_area("Filename Format", value=default_format, height=100, help="Use placeholders like {Date}, {Vendor Name}, etc.")
             
             st.markdown("**Available Tags:**")
@@ -154,7 +157,6 @@ with selection_container.container():
                 "Receipt_Invoice_No": "12345",
                 "Price Amount": "15.50"
             }
-            from utils import generate_filename
             preview_name = generate_filename(example_data, ".jpg", format_string)
             st.info(preview_name)
         else:
@@ -207,6 +209,13 @@ if start_processing:
             results = []
             processed_files_map = {} # Map original filename to new path (if renamed) or old path
             
+            # Initialize ZIP buffer for Upload Mode
+            zip_buffer = None
+            zip_file = None
+            if selection_mode == "Upload Files":
+                zip_buffer = io.BytesIO()
+                zip_file = zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED)
+            
             for i, file_path in enumerate(files_to_process):
                 filename = os.path.basename(file_path)
                 status_text.text(f"Processing: {filename}")
@@ -231,39 +240,57 @@ if start_processing:
                 data = extract_receipt_info(file_path)
                 results.append(data)
                 
-                # Handle Files based on selection (only for local folder mode)
-                if "Error Details" not in data and selection_mode == "Folder Path (Local Only)":
-                    if file_handling == "Rename Original File":
-                        new_path = rename_file(file_path, data, format_string)
-                        processed_files_map[filename] = new_path
-                    elif file_handling == "Copy to 'Processed' Folder":
-                        # Determine destination folder
-                        source_dir = os.path.dirname(file_path)
-                        processed_dir = os.path.join(source_dir, "Processed")
-                        new_path = copy_and_rename_file(file_path, data, processed_dir, format_string)
-                        processed_files_map[filename] = new_path
-                        
-                        # Remove original if archived
-                        if move_to_original:
-                            try:
-                                os.remove(file_path)
-                            except Exception as e:
-                                print(f"Error removing original file {file_path}: {e}")
+                # Handle Files based on selection
+                if "Error Details" not in data:
+                    if selection_mode == "Folder Path (Local Only)":
+                        if file_handling == "Rename Original File":
+                            new_path = rename_file(file_path, data, format_string)
+                            processed_files_map[filename] = new_path
+                        elif file_handling == "Copy to 'Processed' Folder":
+                            # Determine destination folder
+                            source_dir = os.path.dirname(file_path)
+                            processed_dir = os.path.join(source_dir, "Processed")
+                            new_path = copy_and_rename_file(file_path, data, processed_dir, format_string)
+                            processed_files_map[filename] = new_path
+                            
+                            # Remove original if archived
+                            if move_to_original:
+                                try:
+                                    os.remove(file_path)
+                                except Exception as e:
+                                    print(f"Error removing original file {file_path}: {e}")
 
-                    else: # Keep Original
-                        processed_files_map[filename] = file_path
+                        else: # Keep Original
+                            processed_files_map[filename] = file_path
+                            
+                            # Remove original if archived (effectively moving it)
+                            if move_to_original:
+                                try:
+                                    os.remove(file_path)
+                                except Exception as e:
+                                    print(f"Error removing original file {file_path}: {e}")
+                    else: # Upload Files Mode
+                        # Generate new name for report and ZIP
+                        extension = os.path.splitext(filename)[1]
+                        new_filename = generate_filename(data, extension, format_string)
+                        processed_files_map[filename] = new_filename # Store new name for report
                         
-                        # Remove original if archived (effectively moving it)
-                        if move_to_original:
+                        # Add to ZIP
+                        if zip_file:
                             try:
-                                os.remove(file_path)
+                                with open(file_path, 'rb') as f:
+                                    zip_file.writestr(new_filename, f.read())
                             except Exception as e:
-                                print(f"Error removing original file {file_path}: {e}")
+                                print(f"Error adding to zip: {e}")
                 else:
                     processed_files_map[filename] = file_path
                 
                 progress_bar.progress((i + 1) / len(files_to_process))
             
+            # Close ZIP
+            if zip_file:
+                zip_file.close()
+
             status_text.text("Processing Complete!")
             
             # Create DataFrame
@@ -296,9 +323,10 @@ if start_processing:
             # Store in session state
             st.session_state['processed_data'] = {
                 'df': final_df,
-                'save_dir': folder_path if selection_mode == "Folder Path" else os.path.dirname(files_to_process[0]),
+                'save_dir': folder_path if selection_mode == "Folder Path (Local Only)" else os.path.dirname(files_to_process[0]),
                 'file_handling': file_handling,
-                'move_to_original': move_to_original
+                'move_to_original': move_to_original,
+                'zip_buffer': zip_buffer
             }
 
 # Display and Save Logic (Outside the button)
@@ -348,6 +376,17 @@ if st.session_state['processed_data'] is not None:
                     data=file_data,
                     file_name=file_name,
                     mime=mime_type,
+                    type="primary"
+                )
+                
+            # Add ZIP Download Button if available
+            zip_buffer = st.session_state['processed_data'].get('zip_buffer')
+            if zip_buffer:
+                st.download_button(
+                    label="Download Renamed Images (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name="renamed_receipts.zip",
+                    mime="application/zip",
                     type="primary"
                 )
             
