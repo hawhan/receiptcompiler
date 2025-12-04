@@ -88,16 +88,12 @@ with st.sidebar:
 
     # File Handling Options
     file_handling = st.radio("File Handling", 
-                             ["Rename Original File", "Copy to 'Processed' Folder", "Keep Original (No Action)"],
-                             index=1,
+                             ["Rename Files", "Keep Original (No Action)"],
+                             index=0,
                              help="Choose how to handle the source files after processing")
-    
-    move_to_original = st.checkbox("Move source files to 'Original' folder", value=True, help="Move the original source files to an 'Original' folder after processing")
     
     # Output Format
     output_format = st.selectbox("Output Format", ["CSV", "Excel (.xlsx)", "None"])
-
-    st.info("Note: File moving and renaming on disk is only available in 'Folder Path' mode. For uploaded files, you can download a ZIP of renamed files.")
 
     # Initialize session state
     if 'processed_data' not in st.session_state:
@@ -114,26 +110,15 @@ with selection_container.container():
     
     with col1:
         st.subheader("1. Select Files")
-        # File Selection Mode
-        selection_mode = st.radio("Selection Mode", ["Upload Files", "Folder Path (Local Only)"], index=0, horizontal=True)
-        
-        selected_files = []
-        folder_path = ""
-        uploaded_files = []
-        
-        if selection_mode == "Upload Files":
-            uploaded_files = st.file_uploader(
-                "Upload receipt/invoice images",
-                type=["jpg", "jpeg", "png", "webp"],
-                accept_multiple_files=True,
-                help="Select one or more receipt/invoice images to process"
-            )
-            st.info("Supported formats: .jpg, .jpeg, .png, .webp")
-            if uploaded_files:
-                st.success(f"Uploaded {len(uploaded_files)} file(s)")
-        else:
-            default_path = os.getcwd()
-            folder_path = st.text_input("Folder Path", value=default_path, help="Path to the folder containing images (local development only)")
+        uploaded_files = st.file_uploader(
+            "Upload receipt/invoice images",
+            type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+            help="Select one or more receipt/invoice images to process"
+        )
+        st.info("Supported formats: .jpg, .jpeg, .png, .webp")
+        if uploaded_files:
+            st.success(f"Uploaded {len(uploaded_files)} file(s)")
 
     with col2:
         if file_handling != "Keep Original (No Action)":
@@ -169,34 +154,22 @@ if start_processing:
     selection_container.empty() # Hide the selection UI
     st.session_state['data_saved'] = False # Reset saved state on new run
     
-    # if not api_key:
-    #     st.error("Please enter a Gemini API Key.")
-    if selection_mode == "Folder Path (Local Only)" and not os.path.exists(folder_path):
-        st.error("The specified folder path does not exist.")
-    elif selection_mode == "Upload Files" and not uploaded_files:
+    if not uploaded_files:
         st.error("Please upload files to process.")
     else:
         configure_gemini(api_key)
         
-        # Get list of images
+        # Create temporary directory for uploaded files
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
         files_to_process = []
-        temp_dir = None
         
-        if selection_mode == "Folder Path (Local Only)":
-            image_extensions = ('.jpg', '.jpeg', '.png', '.webp')
-            files = [f for f in os.listdir(folder_path) if f.lower().endswith(image_extensions)]
-            files_to_process = [os.path.join(folder_path, f) for f in files]
-        else:  # Upload Files mode
-            # Create temporary directory for uploaded files
-            import tempfile
-            temp_dir = tempfile.mkdtemp()
-            
-            for uploaded_file in uploaded_files:
-                # Save uploaded file to temp directory
-                temp_path = os.path.join(temp_dir, uploaded_file.name)
-                with open(temp_path, 'wb') as f:
-                    f.write(uploaded_file.getbuffer())
-                files_to_process.append(temp_path)
+        for uploaded_file in uploaded_files:
+            # Save uploaded file to temp directory
+            temp_path = os.path.join(temp_dir, uploaded_file.name)
+            with open(temp_path, 'wb') as f:
+                f.write(uploaded_file.getbuffer())
+            files_to_process.append(temp_path)
         
         if not files_to_process:
             st.warning("No image files found.")
@@ -209,12 +182,9 @@ if start_processing:
             results = []
             processed_files_map = {} # Map original filename to new path (if renamed) or old path
             
-            # Initialize ZIP buffer for Upload Mode
-            zip_buffer = None
-            zip_file = None
-            if selection_mode == "Upload Files":
-                zip_buffer = io.BytesIO()
-                zip_file = zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED)
+            # Initialize ZIP buffer for renamed files
+            zip_buffer = io.BytesIO()
+            zip_file = zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) if file_handling == "Rename Files" else None
             
             for i, file_path in enumerate(files_to_process):
                 filename = os.path.basename(file_path)
@@ -225,51 +195,13 @@ if start_processing:
                     st.warning(f"Skipping file not found: {file_path}")
                     continue
 
-                # Archive to 'Original' if requested (only for local folder mode)
-                if move_to_original and selection_mode == "Folder Path (Local Only)":
-                    try:
-                        source_dir = os.path.dirname(file_path)
-                        original_dir = os.path.join(source_dir, "Original")
-                        if not os.path.exists(original_dir):
-                            os.makedirs(original_dir)
-                        shutil.copy2(file_path, os.path.join(original_dir, filename))
-                    except Exception as e:
-                        st.error(f"Error archiving file {filename}: {e}")
-
                 # Extract Info
                 data = extract_receipt_info(file_path)
                 results.append(data)
                 
-                # Handle Files based on selection
+                # Handle Files
                 if "Error Details" not in data:
-                    if selection_mode == "Folder Path (Local Only)":
-                        if file_handling == "Rename Original File":
-                            new_path = rename_file(file_path, data, format_string)
-                            processed_files_map[filename] = new_path
-                        elif file_handling == "Copy to 'Processed' Folder":
-                            # Determine destination folder
-                            source_dir = os.path.dirname(file_path)
-                            processed_dir = os.path.join(source_dir, "Processed")
-                            new_path = copy_and_rename_file(file_path, data, processed_dir, format_string)
-                            processed_files_map[filename] = new_path
-                            
-                            # Remove original if archived
-                            if move_to_original:
-                                try:
-                                    os.remove(file_path)
-                                except Exception as e:
-                                    print(f"Error removing original file {file_path}: {e}")
-
-                        else: # Keep Original
-                            processed_files_map[filename] = file_path
-                            
-                            # Remove original if archived (effectively moving it)
-                            if move_to_original:
-                                try:
-                                    os.remove(file_path)
-                                except Exception as e:
-                                    print(f"Error removing original file {file_path}: {e}")
-                    else: # Upload Files Mode
+                    if file_handling == "Rename Files":
                         # Generate new name for report and ZIP
                         extension = os.path.splitext(filename)[1]
                         new_filename = generate_filename(data, extension, format_string)
@@ -282,8 +214,10 @@ if start_processing:
                                     zip_file.writestr(new_filename, f.read())
                             except Exception as e:
                                 print(f"Error adding to zip: {e}")
+                    else: # Keep Original
+                        processed_files_map[filename] = filename
                 else:
-                    processed_files_map[filename] = file_path
+                    processed_files_map[filename] = filename
                 
                 progress_bar.progress((i + 1) / len(files_to_process))
             
@@ -323,9 +257,8 @@ if start_processing:
             # Store in session state
             st.session_state['processed_data'] = {
                 'df': final_df,
-                'save_dir': folder_path if selection_mode == "Folder Path (Local Only)" else os.path.dirname(files_to_process[0]),
+                'save_dir': temp_dir,
                 'file_handling': file_handling,
-                'move_to_original': move_to_original,
                 'zip_buffer': zip_buffer
             }
 
@@ -390,13 +323,8 @@ if st.session_state['processed_data'] is not None:
                     type="primary"
                 )
             
-            if file_handling_used == "Rename Original File":
+            if file_handling_used == "Rename Files":
                 st.success("Files have been renamed.")
-            elif file_handling_used == "Copy to 'Processed' Folder":
-                st.success("Files have been copied to 'Processed' folder.")
-            
-            if st.session_state['processed_data']['move_to_original']:
-                st.success("Original source files moved to 'Original' folder.")
             
             st.session_state['data_saved'] = True
             
