@@ -71,9 +71,11 @@ and renames the files for easy organization.
 with st.sidebar:
     st.header("Configuration")
     
-    if st.button("Stop App", type="primary"):
-        os.kill(os.getpid(), signal.SIGTERM)
-        
+    if st.button("Reset App", type="primary"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
     # Get API key from Streamlit secrets (cloud) or environment variable (local)
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
@@ -180,6 +182,7 @@ if start_processing:
             status_text = st.empty()
             
             results = []
+            failed_files = [] # List to store failed files
             processed_files_map = {} # Map original filename to new path (if renamed) or old path
             
             # Initialize ZIP buffer for renamed files
@@ -197,10 +200,11 @@ if start_processing:
 
                 # Extract Info
                 data = extract_receipt_info(file_path)
-                results.append(data)
                 
                 # Handle Files
                 if "Error Details" not in data:
+                    results.append(data) # Only add successful results
+                    
                     if file_handling == "Rename Files":
                         # Generate new name for report and ZIP
                         extension = os.path.splitext(filename)[1]
@@ -217,7 +221,8 @@ if start_processing:
                     else: # Keep Original
                         processed_files_map[filename] = filename
                 else:
-                    processed_files_map[filename] = filename
+                    # Add to failed files list
+                    failed_files.append({"filename": filename, "error": data["Error Details"]})
                 
                 progress_bar.progress((i + 1) / len(files_to_process))
             
@@ -227,40 +232,50 @@ if start_processing:
 
             status_text.text("Processing Complete!")
             
-            # Create DataFrame
-            df = pd.DataFrame(results)
-            
-            # Reorder columns to match requirements + File Name at end
-            desired_columns = ["Date", "Item Category", "Vendor Name", "Item Name", "Receipt_Invoice_No", "Price Amount", "File Name"]
-            
-            # Check if we have errors to show
-            if "Error Details" in df.columns:
-                desired_columns.append("Error Details")
+            # Display failed files if any
+            if failed_files:
+                st.error(f"⚠️ Could not process {len(failed_files)} file(s):")
+                for fail in failed_files:
+                    st.write(f"- **{fail['filename']}**: {fail['error']}")
 
-            # Ensure all columns exist
-            for col in desired_columns:
-                if col not in df.columns:
-                    df[col] = ""
-            
-            # Update File Name column if renamed or copied
-            if file_handling != "Keep Original (No Action)":
-                def get_new_name(row):
-                    old_name = row['File Name']
-                    if old_name in processed_files_map:
-                        return os.path.basename(processed_files_map[old_name])
-                    return old_name
+            if not results:
+                st.warning("No valid receipts found in the uploaded files.")
+                st.session_state['processed_data'] = None
+            else:
+                # Create DataFrame
+                df = pd.DataFrame(results)
+                
+                # Reorder columns to match requirements + File Name at end
+                desired_columns = ["Date", "Item Category", "Vendor Name", "Item Name", "Receipt_Invoice_No", "Price Amount", "File Name"]
+                
+                # Check if we have errors to show (shouldn't be any in results now, but kept for safety)
+                if "Error Details" in df.columns:
+                    desired_columns.append("Error Details")
 
-                df['File Name'] = df.apply(get_new_name, axis=1)
+                # Ensure all columns exist
+                for col in desired_columns:
+                    if col not in df.columns:
+                        df[col] = ""
+                
+                # Update File Name column if renamed or copied
+                if file_handling != "Keep Original (No Action)":
+                    def get_new_name(row):
+                        old_name = row['File Name']
+                        if old_name in processed_files_map:
+                            return os.path.basename(processed_files_map[old_name])
+                        return old_name
 
-            final_df = df[desired_columns]
-            
-            # Store in session state
-            st.session_state['processed_data'] = {
-                'df': final_df,
-                'save_dir': temp_dir,
-                'file_handling': file_handling,
-                'zip_buffer': zip_buffer
-            }
+                    df['File Name'] = df.apply(get_new_name, axis=1)
+
+                final_df = df[desired_columns]
+                
+                # Store in session state
+                st.session_state['processed_data'] = {
+                    'df': final_df,
+                    'save_dir': temp_dir,
+                    'file_handling': file_handling,
+                    'zip_buffer': zip_buffer
+                }
 
 # Display and Save Logic (Outside the button)
 if st.session_state['processed_data'] is not None:
