@@ -286,13 +286,13 @@ if st.session_state['processed_data'] is not None:
     st.subheader("Extracted Data")
     st.dataframe(final_df)
     
+    save_path = ""
+    if output_format == "CSV":
+        save_path = os.path.join(save_dir, "compiled_receipts.csv")
+    elif output_format == "Excel (.xlsx)":
+        save_path = os.path.join(save_dir, "compiled_receipts.xlsx")
+
     if not st.session_state['data_saved']:
-        save_path = ""
-        if output_format == "CSV":
-            save_path = os.path.join(save_dir, "compiled_receipts.csv")
-        elif output_format == "Excel (.xlsx)":
-            save_path = os.path.join(save_dir, "compiled_receipts.xlsx")
-        
         try:
             if output_format == "CSV":
                 if os.path.exists(save_path):
@@ -313,31 +313,6 @@ if st.session_state['processed_data'] is not None:
                     final_df.to_excel(save_path, index=False)
                     st.success(f"Saved compiled data to `{save_path}`")
             
-            # Add Download Button
-            with open(save_path, "rb") as f:
-                file_data = f.read()
-                file_name = os.path.basename(save_path)
-                mime_type = "text/csv" if output_format == "CSV" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                
-                st.download_button(
-                    label=f"Download {output_format} File",
-                    data=file_data,
-                    file_name=file_name,
-                    mime=mime_type,
-                    type="primary"
-                )
-                
-            # Add ZIP Download Button if available
-            zip_buffer = st.session_state['processed_data'].get('zip_buffer')
-            if zip_buffer:
-                st.download_button(
-                    label="Download Renamed Images (ZIP)",
-                    data=zip_buffer.getvalue(),
-                    file_name="renamed_receipts.zip",
-                    mime="application/zip",
-                    type="primary"
-                )
-            
             if file_handling_used == "Rename Files":
                 st.success("Files have been renamed.")
             
@@ -350,4 +325,30 @@ if st.session_state['processed_data'] is not None:
                 pass
     else:
         st.info("Data has been saved.")
+
+    # Download Buttons (Always Visible)
+    if os.path.exists(save_path):
+        with open(save_path, "rb") as f:
+            file_data = f.read()
+            file_name = os.path.basename(save_path)
+            mime_type = "text/csv" if output_format == "CSV" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            
+            st.download_button(
+                label=f"Download {output_format} File",
+                data=file_data,
+                file_name=file_name,
+                mime=mime_type,
+                type="primary"
+            )
+            
+    # Add ZIP Download Button if available
+    zip_buffer = st.session_state['processed_data'].get('zip_buffer')
+    if zip_buffer:
+        st.download_button(
+            label="Download Renamed Images (ZIP)",
+            data=zip_buffer.getvalue(),
+            file_name="renamed_receipts.zip",
+            mime="application/zip",
+            type="primary"
+        )
 
